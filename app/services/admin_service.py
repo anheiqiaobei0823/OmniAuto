@@ -69,13 +69,13 @@ def generate_api_key() -> str:
     return "sk-" + secrets.token_hex(24)
 
 
-async def create_api_key(name: Optional[str] = None, allowed_models: list = None) -> dict:
+async def create_api_key(name: Optional[str] = None, allowed_models: list = None, user_id: int = 0) -> dict:
     key = generate_api_key()
     now = datetime.utcnow().isoformat()
     models_json = json.dumps(allowed_models or [])
     await db.execute(
-        "INSERT INTO api_keys (key_value, name, allowed_models, is_active, created_at) VALUES (?, ?, ?, 1, ?)",
-        (key, name or "", models_json, now),
+        "INSERT INTO api_keys (user_id, key_value, name, allowed_models, is_active, created_at) VALUES (?, ?, ?, ?, 1, ?)",
+        (user_id, key, name or "", models_json, now),
     )
     # 返回新 ID
     rows = await db.fetch_all("SELECT MAX(id) as max_id FROM api_keys")
@@ -89,9 +89,10 @@ async def create_api_key(name: Optional[str] = None, allowed_models: list = None
     }
 
 
-async def list_api_keys() -> list:
+async def list_api_keys(user_id: int = 0) -> list:
     rows = await db.fetch_all(
-        "SELECT id, key_value, name, allowed_models, is_active, created_at FROM api_keys ORDER BY created_at DESC"
+        "SELECT id, key_value, name, allowed_models, is_active, created_at FROM api_keys WHERE user_id = ? ORDER BY created_at DESC",
+        (user_id,)
     )
     result = []
     for r in rows:
@@ -136,11 +137,11 @@ async def delete_api_key(key_id: int):
 
 # ─── Provider 管理 ──────────────────────────────────────
 
-async def add_provider(name: str, api_base: str, api_key: str, api_path: str = "/chat/completions") -> int:
+async def add_provider(name: str, api_base: str, api_key: str, api_path: str = "/chat/completions", user_id: int = 0) -> int:
     now = datetime.utcnow().isoformat()
     await db.execute(
-        "INSERT INTO providers (name, api_base, api_path, api_key, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)",
-        (name, api_base, api_path, api_key, now, now),
+        "INSERT INTO providers (user_id, name, api_base, api_path, api_key, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
+        (user_id, name, api_base, api_path, api_key, now, now),
     )
     rows = await db.fetch_all("SELECT MAX(id) as max_id FROM providers")
     return rows[0]["max_id"] if rows else 0
@@ -173,8 +174,8 @@ async def update_provider(pid: int, name: str = None, api_base: str = None, api_
     registry.invalidate(pid)
 
 
-async def list_providers() -> list:
-    return await db.fetch_all("SELECT * FROM providers ORDER BY name")
+async def list_providers(user_id: int = 0) -> list:
+    return await db.fetch_all("SELECT * FROM providers WHERE user_id = ? ORDER BY name", (user_id,))
 
 
 async def discover_models(api_base: str, api_key: str) -> list:
@@ -265,15 +266,15 @@ async def delete_provider(pid: int):
 
 # ─── 分类路由管理 ───────────────────────────────────────
 
-async def list_categories() -> list:
-    return await db.fetch_all("SELECT * FROM categories ORDER BY sort_order")
+async def list_categories(user_id: int = 0) -> list:
+    return await db.fetch_all("SELECT * FROM categories WHERE user_id = ? ORDER BY sort_order", (user_id,))
 
 
-async def add_category(name: str) -> int:
+async def add_category(name: str, user_id: int = 0) -> int:
     now = datetime.utcnow().isoformat()
     await db.execute(
-        "INSERT INTO categories (name, is_default, sort_order, created_at) VALUES (?, 0, 0, ?)",
-        (name, now),
+        "INSERT INTO categories (user_id, name, is_default, sort_order, created_at) VALUES (?, ?, 0, 0, ?)",
+        (user_id, name, now),
     )
     rows = await db.fetch_all("SELECT MAX(id) as max_id FROM categories")
     return rows[0]["max_id"] if rows else 0

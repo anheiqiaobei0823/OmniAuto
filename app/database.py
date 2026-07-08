@@ -46,6 +46,7 @@ SCHEMA_SQL = """
 -- Provider（模型提供商）
 CREATE TABLE IF NOT EXISTS providers (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL DEFAULT 0,
     name        TEXT NOT NULL,                   -- 显示名称
     api_base    TEXT NOT NULL,                   -- Base URL（如 https://api.xxx.com/v1）
     api_path    TEXT NOT NULL DEFAULT '/chat/completions',  -- API 路径
@@ -82,10 +83,12 @@ CREATE TABLE IF NOT EXISTS models (
 -- 分类路由
 CREATE TABLE IF NOT EXISTS categories (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    name        TEXT NOT NULL UNIQUE,
+    user_id     INTEGER NOT NULL DEFAULT 0,
+    name        TEXT NOT NULL,
     is_default  INTEGER NOT NULL DEFAULT 0,
     sort_order  INTEGER NOT NULL DEFAULT 0,
-    created_at  TEXT NOT NULL
+    created_at  TEXT NOT NULL,
+    UNIQUE(user_id, name)
 );
 
 -- 分类-模型优先级（有序列表）
@@ -101,6 +104,7 @@ CREATE TABLE IF NOT EXISTS category_models (
 -- 对外 API Key（客户端调用的 Key）
 CREATE TABLE IF NOT EXISTS api_keys (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER NOT NULL DEFAULT 0,
     key_value       TEXT NOT NULL UNIQUE,
     name            TEXT,                            -- 备注名
     allowed_models  TEXT NOT NULL DEFAULT '[]',      -- JSON 数组：可访问的模型 ID，空数组=全部
@@ -199,6 +203,11 @@ def init_db_sync():
     if not has_col("heartbeat_history", "duration_ms"):
         conn.execute("ALTER TABLE heartbeat_history ADD COLUMN duration_ms INTEGER NOT NULL DEFAULT 0")
 
+    # ─── v0.1.1 迁移：user_id ─────────────────────
+    for tbl in ["providers", "api_keys", "categories"]:
+        if not has_col(tbl, "user_id"):
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1")
+
     # 老数据迁移：把 api_base 末尾的 /chat/completions 剥出来当 api_path
     try:
         rows = conn.execute("SELECT id, api_base, api_path FROM providers").fetchall()
@@ -250,7 +259,7 @@ def init_db_sync():
             ("admin", pwd_hash, 1, 1, now, now)
         )
 
-    # ─── 插入默认分类 ────────────────────────────────
+    # ─── 插入默认分类（仅 admin 账户） ───────────────
     default_categories = [
         ("聊天", 0, 1),
         ("写代码", 0, 2),
@@ -263,8 +272,8 @@ def init_db_sync():
     now = datetime.utcnow().isoformat()
     for name, is_default, sort_order in default_categories:
         conn.execute(
-            "INSERT OR IGNORE INTO categories (name, is_default, sort_order, created_at) VALUES (?, ?, ?, ?)",
-            (name, is_default, sort_order, now),
+            "INSERT OR IGNORE INTO categories (user_id, name, is_default, sort_order, created_at) VALUES (?, ?, ?, ?, ?)",
+            (1, name, is_default, sort_order, now),
         )
 
     # 老数据迁移：给已有模型分配颜色
@@ -416,6 +425,24 @@ class Database:
             "SELECT value FROM settings WHERE key = ?", (key,)
         )
         return row["value"] if row else None
+
+    async def ensure_user_categories(self, user_id: int):
+        """确保用户有默认分类（新用户首次调用时创建）"""
+        existing = await self.fetch_one(
+            "SELECT COUNT(*) as cnt FROM categories WHERE user_id = ?", (user_id,)
+        )
+        if existing and existing["cnt"] > 0:
+            return
+        now = datetime.utcnow().isoformat()
+        defaults = [
+            ("聊天", 0, 1), ("写代码", 0, 2), ("写作", 0, 3),
+            ("翻译", 0, 4), ("生图", 0, 5), ("长任务", 0, 6), ("默认", 1, 99),
+        ]
+        for name, is_default, sort_order in defaults:
+            await self.execute(
+                "INSERT OR IGNORE INTO categories (user_id, name, is_default, sort_order, created_at) VALUES (?, ?, ?, ?, ?)",
+                (user_id, name, is_default, sort_order, now),
+            )
 
     async def set_setting(self, key: str, value: str):
         await self.enqueue_write(

@@ -34,28 +34,31 @@ async def log_call(
     )
 
 
-async def get_logs(limit: int = 100, offset: int = 0) -> list:
+async def get_logs(user_id: int = 0, limit: int = 100, offset: int = 0) -> list:
     return await db.fetch_all(
         """SELECT cl.*, COALESCE(ak.name, '') as api_key_name
            FROM call_logs cl
            LEFT JOIN api_keys ak ON cl.api_key_id = ak.id
+           WHERE (? = 0 OR ak.user_id = ?)
            ORDER BY cl.created_at DESC LIMIT ? OFFSET ?""",
-        (limit, offset),
+        (user_id, user_id, limit, offset),
     )
 
 
-async def get_token_stats() -> list:
-    """按模型汇总 Token 使用量（所有时间）"""
+async def get_token_stats(user_id: int = 0) -> list:
+    """按模型汇总 Token 使用量（当前用户）"""
     return await db.fetch_all(
-        """SELECT model_used, provider_name,
-                  SUM(prompt_tokens) as total_prompt,
-                  SUM(completion_tokens) as total_completion,
-                  SUM(total_tokens) as total_tokens,
+        """SELECT cl.model_used, cl.provider_name,
+                  SUM(cl.prompt_tokens) as total_prompt,
+                  SUM(cl.completion_tokens) as total_completion,
+                  SUM(cl.total_tokens) as total_tokens,
                   COUNT(*) as call_count
-           FROM call_logs
-           WHERE success = 1
-           GROUP BY model_used
-           ORDER BY total_tokens DESC"""
+           FROM call_logs cl
+           LEFT JOIN api_keys ak ON cl.api_key_id = ak.id
+           WHERE cl.success = 1 AND (? = 0 OR ak.user_id = ?)
+           GROUP BY cl.model_used
+           ORDER BY total_tokens DESC""",
+        (user_id, user_id),
     )
 
 
@@ -69,7 +72,7 @@ def _today_start_local() -> str:
     return datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
 
 
-async def get_token_stats_by_hour() -> dict:
+async def get_token_stats_by_hour(user_id: int = 0) -> dict:
     """今日按小时聚合的 Token 用量，返回给前端用于堆叠柱状图
     返回格式：{
         "hours": ["00","01",...,"23"],
@@ -79,15 +82,16 @@ async def get_token_stats_by_hour() -> dict:
     """
     today_start = _today_start_local()
     rows = await db.fetch_all(
-        """SELECT model_used,
-                  strftime('%H', created_at) as hour,
-                  SUM(prompt_tokens) as prompt_t,
-                  SUM(completion_tokens) as completion_t,
-                  SUM(total_tokens) as total_t
-           FROM call_logs
-           WHERE created_at >= ? AND success = 1
-           GROUP BY model_used, hour""",
-        (today_start,),
+        """SELECT cl.model_used,
+                  strftime('%H', cl.created_at) as hour,
+                  SUM(cl.prompt_tokens) as prompt_t,
+                  SUM(cl.completion_tokens) as completion_t,
+                  SUM(cl.total_tokens) as total_t
+           FROM call_logs cl
+           LEFT JOIN api_keys ak ON cl.api_key_id = ak.id
+           WHERE cl.created_at >= ? AND cl.success = 1 AND (? = 0 OR ak.user_id = ?)
+           GROUP BY cl.model_used, hour""",
+        (today_start, user_id, user_id),
     )
 
     # 拉取所有模型的颜色映射
@@ -119,7 +123,7 @@ async def get_token_stats_by_hour() -> dict:
     }
 
 
-async def get_token_stats_by_range(range_key: str) -> dict:
+async def get_token_stats_by_range(range_key: str, user_id: int = 0) -> dict:
     """按日期范围汇总
     range_key: today / yesterday / last3 / last7
     """
@@ -141,25 +145,29 @@ async def get_token_stats_by_range(range_key: str) -> dict:
     end_iso = now.isoformat()
 
     summary = await db.fetch_one(
-        """SELECT SUM(total_tokens) as total_t,
+        """SELECT SUM(cl.total_tokens) as total_t,
                   COUNT(*) as call_count,
-                  AVG(duration_ms) as avg_duration
-           FROM call_logs
-           WHERE created_at >= ? AND created_at <= ? AND success = 1""",
-        (start_iso, end_iso),
+                  AVG(cl.duration_ms) as avg_duration
+           FROM call_logs cl
+           LEFT JOIN api_keys ak ON cl.api_key_id = ak.id
+           WHERE cl.created_at >= ? AND cl.created_at <= ? AND cl.success = 1
+             AND (? = 0 OR ak.user_id = ?)""",
+        (start_iso, end_iso, user_id, user_id),
     )
 
     rows = await db.fetch_all(
-        """SELECT model_used,
-                  SUM(prompt_tokens) as prompt_t,
-                  SUM(completion_tokens) as completion_t,
-                  SUM(total_tokens) as total_t,
+        """SELECT cl.model_used,
+                  SUM(cl.prompt_tokens) as prompt_t,
+                  SUM(cl.completion_tokens) as completion_t,
+                  SUM(cl.total_tokens) as total_t,
                   COUNT(*) as call_count
-           FROM call_logs
-           WHERE created_at >= ? AND created_at <= ? AND success = 1
-           GROUP BY model_used
+           FROM call_logs cl
+           LEFT JOIN api_keys ak ON cl.api_key_id = ak.id
+           WHERE cl.created_at >= ? AND cl.created_at <= ? AND cl.success = 1
+             AND (? = 0 OR ak.user_id = ?)
+           GROUP BY cl.model_used
            ORDER BY total_t DESC""",
-        (start_iso, end_iso),
+        (start_iso, end_iso, user_id, user_id),
     )
 
     model_rows = await db.fetch_all("SELECT model_id, color FROM models")

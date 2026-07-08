@@ -57,8 +57,8 @@ async def chat_completions(request: Request):
     # 是否启用路由
     use_router = router_enabled != "0" if router_enabled else True
 
-    # auto 或空 → 走路由；指定具体模型 → 直接用
-    is_auto = requested_model in ("", "auto")
+    # auto / OmniAuto / 空 → 走路由；指定具体模型 → 直接用
+    is_auto = requested_model in ("", "auto", "OmniAuto")
     force_model = None if is_auto else requested_model
 
     if use_router and is_auto:
@@ -95,6 +95,8 @@ async def chat_completions(request: Request):
 
     start = time.time()
     key_id = await _get_api_key_id(request)
+    if not key_id:
+        raise HTTPException(401, "API Key 无效或已禁用")
 
     if stream:
         return await _handle_stream(chat_req, provider, category, model_id, messages, start, key_id)
@@ -289,15 +291,35 @@ async def images_generations(request: Request):
 
 @router.get("/v1/models")
 async def list_models():
-    """对外只暴露 auto 模型，由路由器自动决定使用哪个实际模型"""
+    """对外只暴露 OmniAuto 模型，由路由器自动决定使用哪个实际模型"""
+    # 同时用嵌套 + 顶级字段 + modalities 数组，兼容各种第三方客户端
+    caps = {
+        "supports_text": True,
+        "supports_vision": True,
+        "supports_image_input": True,
+        "supports_image_output": False,
+        "supports_tools": True,
+        "supports_function_calling": True,
+        "supports_reasoning": True,
+        "supports_stream": True,
+        "supports_image_gen": True,
+    }
     return {
         "object": "list",
         "data": [
             {
-                "id": "auto",
+                "id": "OmniAuto",
                 "object": "model",
                 "owned_by": "OmniAuto",
+                "created": 0,
                 "permissions": [],
+                # 嵌套格式（部分客户端）
+                "capabilities": caps,
+                # 顶级布尔格式（另一部分客户端）
+                **caps,
+                # modalities 数组格式（又一部分客户端）
+                "input_modalities": ["text", "image"],
+                "output_modalities": ["text", "image"],
             }
         ],
     }
