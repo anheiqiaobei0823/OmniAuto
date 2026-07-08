@@ -1,5 +1,9 @@
 # OmniAuto
 
+[![Release](https://img.shields.io/github/v/release/anheiqiaobei0823/OmniAuto)](https://github.com/anheiqiaobei0823/OmniAuto/releases)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
+
 你是否也因为有一堆大模型的 API Key 而烦恼？
 
 OmniAuto 帮你把它们合为一个入口，由一个小模型智能调度。
