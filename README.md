@@ -20,8 +20,6 @@ OmniAuto 帮你把它们合为一个入口，由一个小模型智能调度。
 
 最新版本：[v0.1.1](https://github.com/anheiqiaobei0823/OmniAuto/releases/tag/v0.1.1) · 历史版本：[Releases](https://github.com/anheiqiaobei0823/OmniAuto/releases)
 
-或 `git clone https://github.com/anheiqiaobei0823/OmniAuto.git`
-
 ## 快速开始
 
 ```bash
