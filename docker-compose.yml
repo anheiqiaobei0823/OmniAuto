@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  omniauto:
+    build: .
+    image: omniauto:v0.1.0
+    container_name: omniauto
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - OMNIAUTO_ADMIN_PASSWORD=${OMNIAUTO_ADMIN_PASSWORD:-admin123}
+      - OMNIAUTO_REQUIRE_AUTH=${OMNIAUTO_REQUIRE_AUTH:-1}
+      - OMNIAUTO_JWT_SECRET=${OMNIAUTO_JWT_SECRET:-}
+      - OMNIAUTO_DB_PATH=/app/data/omniauto.db
+      - OMNIAUTO_IMAGES_DIR=/app/data/images
+      - TZ=Asia/Shanghai
